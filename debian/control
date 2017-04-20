@@ -1,0 +1,24 @@
+Source: tcp-shaping
+Section: utils
+Priority: extra
+Maintainer: Zang MingJie <zealot0630@gmail.com>
+Build-Depends: debhelper (>= 9.0.0), dh-autoreconf,
+ autoconf-archive, pkg-config
+Standards-Version: 3.9.4
+Homepage: https://github.com/kghost/tcp-shaping
+Vcs-Git: git://github.com/kghost/tcp-shaping.git
+
+Package: tcp-shaping
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}
+Description: tcp-shaping
+ tcp-shaping
+
+Package: tcp-shaping-dbg
+Architecture: any
+Section: debug
+Depends: tcp-shaping (= ${binary:Version}), ${misc:Depends}
+Description: debugging symbols for tcp-shaping
+ tcp-shaping
+ .
+ This package contains the debugging symbols for tcp-shaping.
