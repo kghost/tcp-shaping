@@ -1,6 +1,8 @@
 #include "config.h"
 
 #include <fcntl.h>
+#include <sys/time.h>
+#include <sys/resource.h>
 
 #include <memory>
 #include <iostream>
@@ -41,8 +43,10 @@ class forwarder : public std::enable_shared_from_this<forwarder> {
 				remote->set_option(boost::asio::ip::v6_only(true));
 			remote->non_blocking(true);
 			remote->set_option(option);
+			BOOST_LOG_TRIVIAL(info) << tag << "connecting";
 			remote->async_connect(endpoint, [me = shared_from_this(), this](const boost::system::error_code& ec) {
 				if (!ec) {
+					BOOST_LOG_TRIVIAL(info) << tag << "connected";
 					int p[2][2];
 					auto rc = ::pipe2(p[0], O_NONBLOCK);
 					if (rc < 0) {
@@ -64,6 +68,8 @@ class forwarder : public std::enable_shared_from_this<forwarder> {
 					loop("p->r", pipe11, remote);
 					loop("r->p", remote, pipe22);
 					loop("p->l", pipe21, local);
+				} else {
+					BOOST_LOG_TRIVIAL(info) << tag << " connection failed";
 				}
 			});
 		}
@@ -139,6 +145,14 @@ class forwarder : public std::enable_shared_from_this<forwarder> {
 
 		static auto shut(boost::asio::ip::tcp::socket& socket) {
 			boost::system::error_code ec;
+			int keepalive_enabled = 1;
+			int keepalive_time = 30;
+			int keepalive_count = 3;
+			int keepalive_interval = 10;
+			setsockopt(socket.native_handle(), SOL_SOCKET, SO_KEEPALIVE, &keepalive_enabled, sizeof(keepalive_enabled));
+			setsockopt(socket.native_handle(), IPPROTO_TCP, TCP_KEEPIDLE, &keepalive_time, sizeof(keepalive_time));
+			setsockopt(socket.native_handle(), IPPROTO_TCP, TCP_KEEPCNT, &keepalive_count, sizeof(keepalive_count));
+			setsockopt(socket.native_handle(), IPPROTO_TCP, TCP_KEEPINTVL, &keepalive_interval, sizeof(keepalive_interval));
 			return socket.shutdown(boost::asio::ip::tcp::socket::shutdown_send, ec);
 		}
 
@@ -154,7 +168,8 @@ class forwarder : public std::enable_shared_from_this<forwarder> {
 
 class listener : public std::enable_shared_from_this<listener> {
 	public:
-		listener(boost::asio::io_service &io_service) : io_service(io_service), socket(io_service) {}
+		listener(boost::asio::io_service &io_service)
+			: io_service(io_service), socket(io_service) {}
 
 		void start(boost::asio::ip::tcp::endpoint endpoint) {
 			try {
@@ -227,6 +242,15 @@ int main (int ac, char **av) {
 #endif
 	}
 
+	struct rlimit nofile;
+	nofile.rlim_cur = 65536;
+	nofile.rlim_max = 65536;
+	int rc = setrlimit(RLIMIT_NOFILE, &nofile);
+	if (rc < 0) {
+		char e[200];
+		BOOST_LOG_TRIVIAL(warning) << "setrlimit: " << strerror_r(errno, e, sizeof(e));
+	}
+
 	boost::asio::io_service io_service;
 
 	boost::asio::signal_set signals(io_service, SIGINT, SIGTERM, SIGPIPE);
@@ -251,8 +275,13 @@ int main (int ac, char **av) {
 		auto handler = [&io_service, resolver, &end](const gh::error_code& ec, boost::asio::ip::tcp::resolver::iterator iterator) {
 			if (!ec) {
 				for (decltype(iterator) iend; iterator != iend; ++iterator) {
-					BOOST_LOG_TRIVIAL(info) << "Listining on port: " << iterator->endpoint() << " from " << end;
-					std::make_shared<listener>(io_service)->start(iterator->endpoint());
+					auto endpoint = iterator->endpoint();
+					if (endpoint.address() == boost::asio::ip::address_v4::any() || endpoint.address() == boost::asio::ip::address_v6::any()) {
+						BOOST_LOG_TRIVIAL(warning) << "Ignoring ANY address: " << endpoint << end;
+						continue;
+					}
+					BOOST_LOG_TRIVIAL(info) << "Listining on port: " << endpoint << " from " << end;
+					std::make_shared<listener>(io_service)->start(endpoint);
 				}
 			} else {
 				BOOST_LOG_TRIVIAL(error) << "Error resolve endpoint(" << end << "): " << ec.message();
