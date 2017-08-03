@@ -1,0 +1,9 @@
+[Unit]
+Description=TCP TProxy
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/tcp-shaping --listen 4893
+
+[Install]
+WantedBy=multi-user.target
