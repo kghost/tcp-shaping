@@ -3,6 +3,8 @@
 #include <fcntl.h>
 #include <sys/time.h>
 #include <sys/resource.h>
+#include <sys/types.h>
+#include <ifaddrs.h>
 
 #include <memory>
 #include <iostream>
@@ -212,6 +214,7 @@ int main (int ac, char **av) {
 	desc.add_options()
 	("help,h", "print this message")
 	("syslog", po::bool_switch()->default_value(false), "use syslog instead of stdout")
+	("interface,i", po::value<std::vector<std::string> >()->composing(), "incoming interfaces")
 	("listen,l", po::value<std::vector<std::string> >()->composing(), "listening ports")
 	;
 
@@ -270,18 +273,67 @@ int main (int ac, char **av) {
 		}
 	});
 
+	std::list<std::pair<std::string, boost::asio::ip::tcp::endpoint>> addresses;
+	do {
+		struct ifaddrs *ifaddr;
+		if (::getifaddrs(&ifaddr) == -1) {
+			char e[200];
+			BOOST_LOG_TRIVIAL(error) << "getifaddrs error: " << strerror_r(errno, e, sizeof(e));
+			break;
+		}
+
+		for (auto &interface: vm["interface"].as<std::vector<std::string>>()) {
+			auto found = false;
+			for (auto ifa = ifaddr; ifa != NULL; ifa = ifa->ifa_next) {
+				if (interface != ifa->ifa_name) continue;
+				found = true;
+				if (ifa->ifa_addr == NULL) continue;
+				switch (ifa->ifa_addr->sa_family) {
+					case AF_INET:
+						{
+							boost::asio::ip::tcp::endpoint e;
+							e.resize(sizeof(struct sockaddr_in));
+							::memcpy(e.data(), ifa->ifa_addr, sizeof(struct sockaddr_in));
+							addresses.push_back(std::make_pair(interface, e));
+							break;
+						}
+					case AF_INET6:
+						{
+							boost::asio::ip::tcp::endpoint e;
+							e.resize(sizeof(struct sockaddr_in6));
+							::memcpy(e.data(), ifa->ifa_addr, sizeof(struct sockaddr_in6));
+							addresses.push_back(std::make_pair(interface, e));
+							break;
+						}
+					default:
+						break;
+				}
+			}
+			if (!found) BOOST_LOG_TRIVIAL(warning) << "Can't find interface: " << interface;
+		}
+
+		::freeifaddrs(ifaddr);
+	} while(false);
+
 	auto resolver = std::make_shared<boost::asio::ip::tcp::resolver>(io_service);
 	for (auto &end : vm["listen"].as<std::vector<std::string>>()) {
-		auto handler = [&io_service, resolver, &end](const gh::error_code& ec, boost::asio::ip::tcp::resolver::iterator iterator) {
+		auto handler = [&io_service, resolver, &end, &addresses](const gh::error_code& ec, boost::asio::ip::tcp::resolver::iterator iterator) {
 			if (!ec) {
 				for (decltype(iterator) iend; iterator != iend; ++iterator) {
 					auto endpoint = iterator->endpoint();
 					if (endpoint.address() == boost::asio::ip::address_v4::any() || endpoint.address() == boost::asio::ip::address_v6::any()) {
-						BOOST_LOG_TRIVIAL(warning) << "Ignoring ANY address: " << endpoint << end;
-						continue;
+						for (auto &a: addresses) {
+							if (a.second.protocol() == endpoint.protocol()) {
+								decltype(a.second) e(a.second);
+								e.port(endpoint.port());
+								BOOST_LOG_TRIVIAL(info) << "Listening on interface(" << a.first << "): " << e;
+								std::make_shared<listener>(io_service)->start(e);
+							}
+						}
+					} else {
+						BOOST_LOG_TRIVIAL(info) << "Listining: " << endpoint << " from " << end;
+						std::make_shared<listener>(io_service)->start(endpoint);
 					}
-					BOOST_LOG_TRIVIAL(info) << "Listining on port: " << endpoint << " from " << end;
-					std::make_shared<listener>(io_service)->start(endpoint);
 				}
 			} else {
 				BOOST_LOG_TRIVIAL(error) << "Error resolve endpoint(" << end << "): " << ec.message();

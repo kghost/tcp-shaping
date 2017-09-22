@@ -3,7 +3,15 @@ Description=TCP TProxy
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/tcp-shaping --listen 4893
+EnvironmentFile=/etc/default/tcp-shaping
+ExecStartPre=/usr/bin/test -n "${INTERFACE}"
+ExecStartPre=/sbin/iptables -t mangle -A PREROUTING -i ${INTERFACE} -p tcp -j TPROXY --on-port ${PORT} --on-ip 0.0.0.0 --tproxy-mark ${FWMARK}
+ExecStartPre=/sbin/ip rule add fwmark ${FWMARK} pref ${RULE} lookup ${RTABLE}
+ExecStartPre=/sbin/ip route add local default dev lo table ${RTABLE}
+ExecStart=/usr/bin/tcp-shaping --interface ${INTERFACE} --listen ${PORT}
+ExecStopPost=/sbin/ip route del local default dev lo table ${RTABLE}
+ExecStopPost=/sbin/ip rule del fwmark ${FWMARK} pref ${RULE} lookup ${RTABLE}
+ExecStopPost=/sbin/iptables -t mangle -D PREROUTING -i ${INTERFACE} -p tcp -j TPROXY --on-port ${PORT} --on-ip 0.0.0.0 --tproxy-mark ${FWMARK}
 
 [Install]
 WantedBy=multi-user.target
