@@ -18,6 +18,8 @@
 #define BOOST_LOG_USE_NATIVE_SYSLOG
 #include <boost/make_shared.hpp>
 #include <boost/log/trivial.hpp>
+#include <boost/log/keywords/auto_flush.hpp>
+#include <boost/log/utility/setup/console.hpp>
 #include <boost/log/sinks/syslog_backend.hpp>
 #include <boost/log/sinks/sync_frontend.hpp>
 #else
@@ -239,16 +241,18 @@ int main (int ac, char **av) {
 		return 1;
 	}
 
-	if (vm["syslog"].as<bool>()) {
 #if defined(HAVE_BOOST_LOG)
+	if (vm["syslog"].as<bool>()) {
 		boost::shared_ptr<boost::log::sinks::syslog_backend> backend(new boost::log::sinks::syslog_backend(
 				boost::log::keywords::facility = boost::log::sinks::syslog::user,
 				boost::log::keywords::use_impl = boost::log::sinks::syslog::native));
 		boost::log::core::get()->add_sink(boost::make_shared<boost::log::sinks::synchronous_sink<boost::log::sinks::syslog_backend> >(backend));
-#else
-		Logger::use_syslog = true;
-#endif
+	} else {
+		boost::log::add_console_log(std::clog, boost::log::keywords::auto_flush = true);
 	}
+#else
+	Logger::use_syslog = vm["syslog"].as<bool>();
+#endif
 
 	struct rlimit nofile;
 	nofile.rlim_cur = 65536;
