@@ -88,7 +88,7 @@ class forwarder : public std::enable_shared_from_this<forwarder> {
 				if (!ec) {
 					auto eof = false;
 					auto pause = false;
-					for (auto av = std::max(available(*input), 1ul); av > 0; av = available(*input)) {
+					for (auto av = std::max(available(*input), (std::size_t) 1); av > 0; av = available(*input)) {
 						auto rc = ::splice(input->native_handle(), nullptr, output->native_handle(), nullptr, av, SPLICE_F_MOVE|SPLICE_F_NONBLOCK);
 						if (rc == 0) {
 							eof = true;
