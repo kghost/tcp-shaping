@@ -9,6 +9,8 @@
 #include <memory>
 #include <iostream>
 #include <boost/asio.hpp>
+#include <boost/fusion/adapted/std_tuple.hpp>
+#include <boost/fusion/include/for_each.hpp>
 #include <boost/program_options.hpp>
 #include <boost/filesystem.hpp>
 #include <boost/date_time/posix_time/posix_time.hpp>
@@ -36,15 +38,18 @@ class forwarder : public std::enable_shared_from_this<forwarder> {
 			}
 
 		void start() {
-			boost::asio::ip::tcp::no_delay option(true);
+			const auto options = std::make_tuple(
+				boost::asio::ip::tcp::no_delay(true),
+				boost::asio::socket_base::keep_alive(true)
+			);
+
 			local->non_blocking(true);
-			local->set_option(option);
+			boost::fusion::for_each(options, [this](auto option) { local->set_option(option); });
 			auto endpoint = local->local_endpoint();
 			remote->open(endpoint.protocol());
-			if (endpoint.protocol().family() == AF_INET6)
-				remote->set_option(boost::asio::ip::v6_only(true));
+			if (endpoint.protocol().family() == AF_INET6) remote->set_option(boost::asio::ip::v6_only(true));
 			remote->non_blocking(true);
-			remote->set_option(option);
+			boost::fusion::for_each(options, [this](auto option) { remote->set_option(option); });
 			BOOST_LOG_TRIVIAL(info) << tag << "connecting";
 			remote->async_connect(endpoint, [me = shared_from_this(), this](const boost::system::error_code& ec) {
 				if (!ec) {
