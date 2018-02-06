@@ -35,7 +35,14 @@ class forwarder : public std::enable_shared_from_this<forwarder> {
 		forwarder(boost::asio::io_service& io_service, std::shared_ptr<boost::asio::ip::tcp::socket> local)
 			: io_service(io_service), local(local) {
 				std::stringstream ss;
-				ss << "forwarder(" << local->remote_endpoint() << " => " << local->local_endpoint() << ") ";
+				ss << "forwarder(";
+				boost::system::error_code ec;
+				auto el = local->local_endpoint(ec);
+				if (!ec) ss << el; else ss << "unknown";
+				ss << " => ";
+				auto er = local->remote_endpoint(ec);
+				if (!ec) ss << er; else ss << "unknown";
+				ss << ") ";
 				tag = ss.str();
 			}
 
